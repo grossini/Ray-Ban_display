@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="DICOM 3D volume viewer with D-pad rotation for Meta Ray-Ban Display glasses.">
+  <meta name="mrbd-web-app-capable" content="yes">
+  <title>DICOM 3D Viewer</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Home: file picker ── -->
+    <div id="home" class="screen">
+      <header class="header">
+        <h1>DICOM 3D Viewer</h1>
+        <span class="header-meta" id="status-indicator">Ready</span>
+      </header>
+      <div class="content centered">
+        <div class="drop-zone" id="drop-zone">
+          <div class="drop-icon">🩻</div>
+          <div class="drop-label">Drop DICOM file here</div>
+          <div class="drop-hint">or use the button below</div>
+        </div>
+        <input type="file" id="file-input" accept=".dcm,application/dicom" style="display:none">
+      </div>
+      <nav class="nav-bar">
+        <button class="nav-item focusable primary" data-action="pick-file">Load DICOM File</button>
+      </nav>
+    </div>
+
+    <!-- ── Loading ── -->
+    <div id="loading-screen" class="screen hidden">
+      <div class="loading-full">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loading-text">Reading file…</div>
+        <div class="progress-bar" style="width:80%;margin-top:8px;">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+        <div class="loading-hint" id="loading-hint"></div>
+      </div>
+    </div>
+
+    <!-- ── 3D Viewer ── -->
+    <div id="viewer" class="screen hidden">
+      <canvas id="three-canvas" class="focusable" tabindex="0"></canvas>
+
+      <!-- Mode indicator (top-left) -->
+      <div class="viewer-mode" id="viewer-mode">ROTATE</div>
+
+      <!-- Threshold slider (bottom, visible in threshold mode) -->
+      <div class="viewer-slider" id="viewer-slider">
+        <div class="slider-row">
+          <span class="slider-label">Threshold</span>
+          <span class="slider-value" id="slider-value">0%</span>
+        </div>
+        <div class="slider-track">
+          <div class="slider-fill" id="slider-fill"></div>
+          <div class="slider-thumb" id="slider-thumb"></div>
+        </div>
+        <div class="slider-hint">← less &nbsp;·&nbsp; → more &nbsp;·&nbsp; Enter back to rotate</div>
+      </div>
+
+      <div class="viewer-hud" id="viewer-hud">
+        <span class="hud-hint">← → ↑ ↓ rotate &nbsp;·&nbsp; Enter threshold &nbsp;·&nbsp; Esc back</span>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
