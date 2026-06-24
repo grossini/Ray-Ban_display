@@ -72,6 +72,31 @@
 
   // ── DICOM loading ────────────────────────────────────────
 
+  // Returns a typed pixel array respecting signedness (CT is signed int16),
+  // plus the modality rescale (raw -> Hounsfield/real units).
+  function getSlicePixels(dataSet, byteArray) {
+    var pEl = dataSet.elements.x7fe00010;
+    if (!pEl) return null;
+    var rows = dataSet.uint16('x00280010') || 512;
+    var cols = dataSet.uint16('x00280011') || 512;
+    var count = rows * cols;
+    var bits   = dataSet.uint16('x00280100') || 16;
+    var signed = (dataSet.uint16('x00280103') || 0) === 1;
+
+    var arr;
+    if (bits === 16) {
+      arr = signed
+        ? new Int16Array(byteArray.buffer, pEl.dataOffset, count)
+        : new Uint16Array(byteArray.buffer, pEl.dataOffset, count);
+    } else {
+      arr = new Uint8Array(byteArray.buffer, pEl.dataOffset, count);
+    }
+
+    var slope     = parseFloat(dataSet.string('x00281053')) || 1; // RescaleSlope
+    var intercept = parseFloat(dataSet.string('x00281052')) || 0; // RescaleIntercept
+    return { arr: arr, slope: slope, intercept: intercept, rows: rows, cols: cols };
+  }
+
   function readFileAsync(file) {
     return new Promise(function (resolve, reject) {
       var reader = new FileReader();
@@ -138,28 +163,24 @@
     var rows   = first.uint16('x00280010') || 512;
     var cols   = first.uint16('x00280011') || 512;
     var frames = slices.length;
-    var bitsAllocated = first.uint16('x00280100') || 16;
 
+    // Window in real (Hounsfield) units. Prefer DICOM tags, else auto-sample.
     var wcStr = first.string('x00281050');
     var wwStr = first.string('x00281051');
     var wc    = wcStr ? parseFloat(wcStr.split('\\')[0]) : 0;
     var ww    = wwStr ? parseFloat(wwStr.split('\\')[0]) : 0;
 
-    // Auto window by sampling across slices when tags missing
     if (!ww || ww < 1) {
       var mn = Infinity, mx = -Infinity;
       var step = Math.max(1, Math.floor(slices.length / 10));
       for (var si = 0; si < slices.length; si += step) {
-        var pEl = slices[si].dataSet.elements.x7fe00010;
-        if (!pEl) continue;
-        var count = rows * cols;
-        var raw = bitsAllocated === 16
-          ? new Uint16Array(slices[si].byteArray.buffer, pEl.dataOffset, count)
-          : new Uint8Array(slices[si].byteArray.buffer, pEl.dataOffset, count);
-        var ps = Math.max(1, Math.floor(count / 500));
-        for (var pi = 0; pi < raw.length; pi += ps) {
-          if (raw[pi] < mn) mn = raw[pi];
-          if (raw[pi] > mx) mx = raw[pi];
+        var sp = getSlicePixels(slices[si].dataSet, slices[si].byteArray);
+        if (!sp) continue;
+        var ps = Math.max(1, Math.floor(sp.arr.length / 500));
+        for (var pi = 0; pi < sp.arr.length; pi += ps) {
+          var hu = sp.arr[pi] * sp.slope + sp.intercept;
+          if (hu < mn) mn = hu;
+          if (hu > mx) mx = hu;
         }
       }
       wc = (mn + mx) / 2;
@@ -176,16 +197,14 @@
 
     for (var z = 0; z < tD; z++) {
       var srcIdx = Math.floor(z * frames / tD);
-      var pixEl  = slices[srcIdx].dataSet.elements.x7fe00010;
-      if (!pixEl) continue;
-      var rawPx = bitsAllocated === 16
-        ? new Uint16Array(slices[srcIdx].byteArray.buffer, pixEl.dataOffset, rows * cols)
-        : new Uint8Array(slices[srcIdx].byteArray.buffer, pixEl.dataOffset, rows * cols);
+      var slc = getSlicePixels(slices[srcIdx].dataSet, slices[srcIdx].byteArray);
+      if (!slc) continue;
       for (var y = 0; y < tH; y++) {
         var sy = Math.floor(y * rows / tH);
         for (var x = 0; x < tW; x++) {
           var sx  = Math.floor(x * cols / tW);
-          var val = Math.round(255 * Math.max(0, Math.min(1, ((rawPx[sy * cols + sx] || 0) - wMin) / range)));
+          var huv = slc.arr[sy * cols + sx] * slc.slope + slc.intercept;
+          var val = Math.round(255 * Math.max(0, Math.min(1, (huv - wMin) / range)));
           data[z * tH * tW + y * tW + x] = val;
         }
       }
@@ -246,6 +265,9 @@
     var frStr  = dataSet.string('x00280008');
     var frames = frStr ? parseInt(frStr, 10) : 1;
     var bitsAllocated = dataSet.uint16('x00280100') || 16;
+    var signed        = (dataSet.uint16('x00280103') || 0) === 1;
+    var slope         = parseFloat(dataSet.string('x00281053')) || 1;
+    var intercept     = parseFloat(dataSet.string('x00281052')) || 0;
 
     var wcStr = dataSet.string('x00281050');
     var wwStr = dataSet.string('x00281051');
@@ -255,7 +277,7 @@
     var pixelEl = dataSet.elements.x7fe00010;
     if (!pixelEl) throw new Error('No pixel data (7FE0,0010) found.');
 
-    return { byteArray, rows, cols, frames, bitsAllocated, windowCenter, windowWidth, pixelEl };
+    return { byteArray, rows, cols, frames, bitsAllocated, signed, slope, intercept, windowCenter, windowWidth, pixelEl };
   }
 
   function buildVolume(info) {
@@ -267,19 +289,23 @@
     var pixelCount = info.rows * info.cols * info.frames;
     var rawPixels;
     if (info.bitsAllocated === 16) {
-      rawPixels = new Uint16Array(info.byteArray.buffer, info.pixelEl.dataOffset, pixelCount);
+      rawPixels = info.signed
+        ? new Int16Array(info.byteArray.buffer, info.pixelEl.dataOffset, pixelCount)
+        : new Uint16Array(info.byteArray.buffer, info.pixelEl.dataOffset, pixelCount);
     } else {
       rawPixels = new Uint8Array(info.byteArray.buffer, info.pixelEl.dataOffset, pixelCount);
     }
+    var slope = info.slope, intercept = info.intercept;
 
-    // Auto window/level if DICOM tags are missing
+    // Window in real units (apply modality rescale). Prefer DICOM tags.
     var wc = info.windowCenter, ww = info.windowWidth;
     if (!ww || ww < 1) {
       var step = Math.max(1, Math.floor(rawPixels.length / 8000));
       var mn = Infinity, mx = -Infinity;
       for (var i = 0; i < rawPixels.length; i += step) {
-        if (rawPixels[i] < mn) mn = rawPixels[i];
-        if (rawPixels[i] > mx) mx = rawPixels[i];
+        var hu = rawPixels[i] * slope + intercept;
+        if (hu < mn) mn = hu;
+        if (hu > mx) mx = hu;
       }
       wc = (mn + mx) / 2;
       ww = (mx - mn) || 1;
@@ -297,7 +323,8 @@
         for (var x = 0; x < tW; x++) {
           var sx  = Math.floor(x * info.cols / tW);
           var raw = rawPixels[sz * info.rows * info.cols + sy * info.cols + sx] || 0;
-          var val = Math.round(255 * Math.max(0, Math.min(1, (raw - wMin) / range)));
+          var huVal = raw * slope + intercept;
+          var val = Math.round(255 * Math.max(0, Math.min(1, (huVal - wMin) / range)));
           data[z * tH * tW + y * tW + x] = val;
         }
       }
