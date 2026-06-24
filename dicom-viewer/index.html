@@ -20,17 +20,28 @@
         <span class="header-meta" id="status-indicator">Ready</span>
       </header>
       <div class="content centered">
-        <div class="drop-zone" id="drop-zone">
-          <div class="drop-icon">🩻</div>
-          <div class="drop-label">Drop file or folder here</div>
-          <div class="drop-hint">single DICOM or CT series folder</div>
+        <div class="study-list">
+          <button class="study-item focusable" data-action="load-vol" data-url="tee.vol" data-name="TEE Heart">
+            <span class="study-icon">🫀</span>
+            <span class="study-text">
+              <span class="study-title">TEE Heart (3D Echo)</span>
+              <span class="study-meta">Volumetric ultrasound</span>
+            </span>
+          </button>
+          <button class="study-item focusable" data-action="load-vol" data-url="ct.vol" data-name="Congenital CT">
+            <span class="study-icon">🩻</span>
+            <span class="study-text">
+              <span class="study-title">Congenital CT</span>
+              <span class="study-meta">Cardiac CT series</span>
+            </span>
+          </button>
         </div>
+        <!-- Local pickers (work in a desktop browser, not on glasses) -->
         <input type="file" id="file-input" accept=".dcm,application/dicom" style="display:none">
         <input type="file" id="folder-input" webkitdirectory multiple style="display:none">
       </div>
       <nav class="nav-bar">
-        <button class="nav-item focusable primary" data-action="pick-file">Single File</button>
-        <button class="nav-item focusable" data-action="pick-folder">CT Series Folder</button>
+        <button class="nav-item focusable" data-action="pick-file">Local File…</button>
       </nav>
     </div>
 

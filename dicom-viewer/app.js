@@ -70,6 +70,39 @@
     focusables[next].focus();
   }
 
+  // ── Pre-baked volume loading (.vol) ──────────────────────
+  // Format: 'VOL1' magic | uint16 w,h,d (LE) | w*h*d bytes Uint8
+
+  function loadVolFile(url, name) {
+    navigateTo('loading-screen', { addToHistory: false });
+    setLoadingText('Downloading ' + (name || 'volume') + '…');
+    setProgress(10);
+
+    fetch(url).then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.arrayBuffer();
+    }).then(function (buf) {
+      setProgress(60);
+      setLoadingText('Building volume…');
+
+      var head = new DataView(buf, 0, 10);
+      var magic = String.fromCharCode(head.getUint8(0), head.getUint8(1), head.getUint8(2), head.getUint8(3));
+      if (magic !== 'VOL1') throw new Error('Bad volume file.');
+      var width  = head.getUint16(4, true);
+      var height = head.getUint16(6, true);
+      var depth  = head.getUint16(8, true);
+      var data   = new Uint8Array(buf, 10, width * height * depth);
+
+      setTimeout(function () {
+        try {
+          setupViewer({ data: data, width: width, height: height, depth: depth });
+          setProgress(100);
+          navigateTo('viewer', { addToHistory: false });
+        } catch (err) { onError('Renderer error: ' + err.message); }
+      }, 60);
+    }).catch(function (err) { onError('Load error: ' + err.message); });
+  }
+
   // ── DICOM loading ────────────────────────────────────────
 
   // Returns a typed pixel array respecting signedness (CT is signed int16),
@@ -548,8 +581,11 @@
 
   // ── Action dispatch ──────────────────────────────────────
 
-  function handleAction(action) {
+  function handleAction(action, el) {
     switch (action) {
+      case 'load-vol':
+        if (el) loadVolFile(el.dataset.url, el.dataset.name);
+        break;
       case 'pick-file':
         document.getElementById('file-input').click();
         break;
@@ -569,7 +605,7 @@
     // Button clicks
     document.addEventListener('click', function (e) {
       var el = e.target.closest('[data-action]');
-      if (el) handleAction(el.dataset.action);
+      if (el) handleAction(el.dataset.action, el);
     });
 
     // Single file picker

@@ -181,6 +181,29 @@ body {
 .drop-label { font-size: 16px; font-weight: 500; }
 .drop-hint  { font-size: 13px; color: var(--text-secondary); }
 
+/* ── Study list (home) ── */
+.study-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 440px;
+}
+.study-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  text-align: left;
+}
+.study-item:focus { background: var(--bg-tertiary); }
+.study-icon { font-size: 40px; flex-shrink: 0; }
+.study-text { display: flex; flex-direction: column; gap: 4px; }
+.study-title { font-size: 19px; font-weight: 600; }
+.study-meta  { font-size: 14px; color: var(--text-secondary); }
+
 /* ── Viewer ── */
 #viewer { background: #000; }
 
