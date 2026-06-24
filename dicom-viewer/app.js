@@ -11,11 +11,16 @@
   var threshold  = 0.42; // current wMin value [0..1]
 
   // ── 3D model manifest ────────────────────────────────────
-  // Aggiungi/sostituisci qui i file OBJ del collega e i relativi colori.
-  // url: percorso relativo (ospitato accanto all'app)  ·  color: esadecimale
+  // url: percorso relativo  ·  color: esadecimale  ·  opacity: 0-1 (opz.)
   var MODELS = [
-    { url: 'models/sample1.obj', color: '#ff5566', name: 'Modello 1' },
-    { url: 'models/sample2.obj', color: '#33ccff', name: 'Modello 2' },
+    { url: 'models/rv.stl',           color: '#4a90d9', name: 'Right Ventricle', opacity: 0.85 },
+    { url: 'models/ra.stl',           color: '#5bc0de', name: 'Right Atrium',    opacity: 0.85 },
+    { url: 'models/ivc.stl',          color: '#9b59b6', name: 'IVC' },
+    { url: 'models/esophagus.stl',    color: '#8fbf60', name: 'Esophagus',       opacity: 0.6 },
+    { url: 'models/av_landmark.stl',  color: '#e74c3c', name: 'AV landmark' },
+    { url: 'models/tv_landmark.stl',  color: '#f39c12', name: 'TV landmark' },
+    { url: 'models/pv_landmark.stl',  color: '#f1c40f', name: 'PV landmark' },
+    { url: 'models/ivc_landmark.stl', color: '#e056a0', name: 'IVC landmark' },
   ];
 
   var state = {
@@ -522,17 +527,36 @@
 
   // ── OBJ models loading ───────────────────────────────────
 
+  function makeMaterial(m) {
+    var mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(m.color || '#cccccc'),
+      metalness: 0.0,
+      roughness: 0.55,
+      side: THREE.DoubleSide,
+    });
+    if (typeof m.opacity === 'number' && m.opacity < 1) {
+      mat.transparent = true;
+      mat.opacity = m.opacity;
+      mat.depthWrite = false; // avoids sorting artefacts on overlapping organs
+    }
+    return mat;
+  }
+
   function loadModels() {
-    if (typeof THREE.OBJLoader === 'undefined') { onError('OBJLoader non disponibile.'); return; }
     if (!MODELS.length) { onError('Nessun modello configurato.'); return; }
 
     navigateTo('loading-screen', { addToHistory: false });
     setLoadingText('Caricamento modelli…');
     setProgress(10);
 
-    var loader = new THREE.OBJLoader();
-    var group  = new THREE.Group();
+    var group = new THREE.Group();
     var done = 0, total = MODELS.length;
+
+    function tick() {
+      done++;
+      setProgress(10 + Math.round(80 * done / total));
+      if (done === total) finish();
+    }
 
     function finish() {
       if (group.children.length === 0) { onError('Impossibile caricare i modelli.'); return; }
@@ -544,24 +568,24 @@
     }
 
     MODELS.forEach(function (m) {
-      loader.load(
-        m.url,
-        function (obj) {
-          var color = new THREE.Color(m.color || '#cccccc');
-          obj.traverse(function (child) {
-            if (child.isMesh) {
-              child.material = new THREE.MeshStandardMaterial({
-                color: color, metalness: 0.0, roughness: 0.55, side: THREE.DoubleSide,
-              });
-            }
-          });
+      var ext = m.url.split('.').pop().toLowerCase();
+      var mat = makeMaterial(m);
+
+      if (ext === 'stl') {
+        if (typeof THREE.STLLoader === 'undefined') { tick(); return; }
+        new THREE.STLLoader().load(m.url, function (geo) {
+          geo.computeVertexNormals();
+          group.add(new THREE.Mesh(geo, mat));
+          tick();
+        }, undefined, tick);
+      } else {
+        if (typeof THREE.OBJLoader === 'undefined') { tick(); return; }
+        new THREE.OBJLoader().load(m.url, function (obj) {
+          obj.traverse(function (c) { if (c.isMesh) c.material = mat; });
           group.add(obj);
-          done++; setProgress(10 + Math.round(80 * done / total));
-          if (done === total) finish();
-        },
-        undefined,
-        function () { done++; if (done === total) finish(); }
-      );
+          tick();
+        }, undefined, tick);
+      }
     });
   }
 
