@@ -35,6 +35,13 @@
               <span class="study-meta">Cardiac CT series</span>
             </span>
           </button>
+          <button class="study-item focusable" data-action="load-models" data-name="3D Models">
+            <span class="study-icon">🧊</span>
+            <span class="study-text">
+              <span class="study-title">Modelli 3D (OBJ)</span>
+              <span class="study-meta">Mesh colorate</span>
+            </span>
+          </button>
         </div>
         <!-- Local pickers (work in a desktop browser, not on glasses) -->
         <input type="file" id="file-input" accept=".dcm,application/dicom" style="display:none">
@@ -85,6 +92,7 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
   <script src="app.js"></script>
 </body>

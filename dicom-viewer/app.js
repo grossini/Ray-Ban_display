@@ -10,6 +10,14 @@
   var viewerMode = 'rotate';
   var threshold  = 0.42; // current wMin value [0..1]
 
+  // ── 3D model manifest ────────────────────────────────────
+  // Aggiungi/sostituisci qui i file OBJ del collega e i relativi colori.
+  // url: percorso relativo (ospitato accanto all'app)  ·  color: esadecimale
+  var MODELS = [
+    { url: 'models/sample1.obj', color: '#ff5566', name: 'Modello 1' },
+    { url: 'models/sample2.obj', color: '#33ccff', name: 'Modello 2' },
+  ];
+
   var state = {
     currentScreen: 'home',
     screenHistory: [],
@@ -439,13 +447,22 @@
     }
   `;
 
-  function setupViewer(vol) {
-    // Dispose previous renderer if reloading a file
+  function disposeViewer() {
     if (threeApp) {
       cancelAnimationFrame(animFrameId);
+      animFrameId = null;
       threeApp.renderer.dispose();
       threeApp = null;
     }
+  }
+
+  function setHudHint(text) {
+    var el = document.querySelector('#viewer-hud .hud-hint');
+    if (el) el.innerHTML = text;
+  }
+
+  function setupViewer(vol) {
+    disposeViewer();
 
     var canvas = document.getElementById('three-canvas');
     canvas.width  = 600;
@@ -494,10 +511,97 @@
     var mesh = new THREE.Mesh(geo, mat);
     scene.add(mesh);
 
-    threeApp = { renderer, scene, camera, mesh };
+    threeApp = { renderer, scene, camera, mesh, isModels: false };
     viewerRotX = 0;
     viewerRotY = 0.4;
-    viewerMode = 'rotate';
+    setViewerMode('rotate');
+    setHudHint('← → ↑ ↓ ruota &nbsp;·&nbsp; Enter soglia &nbsp;·&nbsp; Esc indietro');
+
+    startRenderLoop();
+  }
+
+  // ── OBJ models loading ───────────────────────────────────
+
+  function loadModels() {
+    if (typeof THREE.OBJLoader === 'undefined') { onError('OBJLoader non disponibile.'); return; }
+    if (!MODELS.length) { onError('Nessun modello configurato.'); return; }
+
+    navigateTo('loading-screen', { addToHistory: false });
+    setLoadingText('Caricamento modelli…');
+    setProgress(10);
+
+    var loader = new THREE.OBJLoader();
+    var group  = new THREE.Group();
+    var done = 0, total = MODELS.length;
+
+    function finish() {
+      if (group.children.length === 0) { onError('Impossibile caricare i modelli.'); return; }
+      try {
+        setupModelsViewer(group);
+        setProgress(100);
+        navigateTo('viewer', { addToHistory: false });
+      } catch (e) { onError('Renderer error: ' + e.message); }
+    }
+
+    MODELS.forEach(function (m) {
+      loader.load(
+        m.url,
+        function (obj) {
+          var color = new THREE.Color(m.color || '#cccccc');
+          obj.traverse(function (child) {
+            if (child.isMesh) {
+              child.material = new THREE.MeshStandardMaterial({
+                color: color, metalness: 0.0, roughness: 0.55, side: THREE.DoubleSide,
+              });
+            }
+          });
+          group.add(obj);
+          done++; setProgress(10 + Math.round(80 * done / total));
+          if (done === total) finish();
+        },
+        undefined,
+        function () { done++; if (done === total) finish(); }
+      );
+    });
+  }
+
+  function setupModelsViewer(group) {
+    disposeViewer();
+
+    var canvas = document.getElementById('three-canvas');
+    canvas.width = 600; canvas.height = 600;
+
+    var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    renderer.setSize(600, 600, false);
+    renderer.setPixelRatio(1);
+
+    var scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000);
+
+    var camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+    camera.position.set(0, 0, 2.4);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    var key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(1, 1, 1.2); scene.add(key);
+    var fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(-1, -0.5, -1); scene.add(fill);
+
+    // Center the combined geometry at the origin, then scale to fit the view
+    var box = new THREE.Box3().setFromObject(group);
+    var center = box.getCenter(new THREE.Vector3());
+    var size = box.getSize(new THREE.Vector3());
+    group.position.sub(center);
+
+    var pivot = new THREE.Group();
+    pivot.add(group);
+    var maxDim = Math.max(size.x, size.y, size.z) || 1;
+    pivot.scale.setScalar(1.4 / maxDim);
+    scene.add(pivot);
+
+    threeApp = { renderer, scene, camera, mesh: pivot, isModels: true };
+    viewerRotX = 0;
+    viewerRotY = 0.4;
+    setViewerMode('rotate');
+    setHudHint('← → ↑ ↓ ruota &nbsp;·&nbsp; Esc indietro');
 
     startRenderLoop();
   }
@@ -586,6 +690,9 @@
       case 'load-vol':
         if (el) loadVolFile(el.dataset.url, el.dataset.name);
         break;
+      case 'load-models':
+        loadModels();
+        break;
       case 'pick-file':
         document.getElementById('file-input').click();
         break;
@@ -661,7 +768,11 @@
 
         case 'Enter':
           if (inViewer) {
-            setViewerMode(viewerMode === 'rotate' ? 'threshold' : 'rotate');
+            if (threeApp && threeApp.isModels) {
+              viewerRotX = 0; viewerRotY = 0.4; showToast('Vista azzerata');
+            } else {
+              setViewerMode(viewerMode === 'rotate' ? 'threshold' : 'rotate');
+            }
           } else if (document.activeElement && document.activeElement.classList.contains('focusable')) {
             document.activeElement.click();
           }
