@@ -12,15 +12,16 @@
 
   // ── 3D model manifest ────────────────────────────────────
   // url: percorso relativo  ·  color: esadecimale  ·  opacity: 0-1 (opz.)
+  // overlay:true -> sempre visibile sopra le superfici (marker), senza trasparenza
   var MODELS = [
-    { url: 'models/rv.stl',           color: '#4a90d9', name: 'Right Ventricle', opacity: 0.85 },
-    { url: 'models/ra.stl',           color: '#5bc0de', name: 'Right Atrium',    opacity: 0.85 },
+    { url: 'models/rv.stl',           color: '#4a90d9', name: 'Right Ventricle' },
+    { url: 'models/ra.stl',           color: '#5bc0de', name: 'Right Atrium' },
     { url: 'models/ivc.stl',          color: '#9b59b6', name: 'IVC' },
-    { url: 'models/esophagus.stl',    color: '#8fbf60', name: 'Esophagus',       opacity: 0.6 },
-    { url: 'models/av_landmark.stl',  color: '#e74c3c', name: 'AV landmark' },
-    { url: 'models/tv_landmark.stl',  color: '#f39c12', name: 'TV landmark' },
-    { url: 'models/pv_landmark.stl',  color: '#f1c40f', name: 'PV landmark' },
-    { url: 'models/ivc_landmark.stl', color: '#e056a0', name: 'IVC landmark' },
+    { url: 'models/esophagus.stl',    color: '#8fbf60', name: 'Esophagus' },
+    { url: 'models/av_landmark.stl',  color: '#e74c3c', name: 'AV landmark',  overlay: true },
+    { url: 'models/tv_landmark.stl',  color: '#f39c12', name: 'TV landmark',  overlay: true },
+    { url: 'models/pv_landmark.stl',  color: '#f1c40f', name: 'PV landmark',  overlay: true },
+    { url: 'models/ivc_landmark.stl', color: '#e056a0', name: 'IVC landmark', overlay: true },
   ];
 
   var state = {
@@ -528,18 +529,26 @@
   // ── OBJ models loading ───────────────────────────────────
 
   function makeMaterial(m) {
+    var color = new THREE.Color(m.color || '#cccccc');
     var mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(m.color || '#cccccc'),
-      metalness: 0.0,
-      roughness: 0.55,
+      color: color,
+      metalness: 0.05,
+      roughness: 0.45,    // a little specular -> curvature reads on a flat lens
       side: THREE.DoubleSide,
     });
-    if (typeof m.opacity === 'number' && m.opacity < 1) {
-      mat.transparent = true;
-      mat.opacity = m.opacity;
-      mat.depthWrite = false; // avoids sorting artefacts on overlapping organs
+    if (m.overlay) {
+      // Always-visible marker: no depth test, self-lit so it pops as an overlay
+      mat.depthTest = false;
+      mat.emissive = color.clone().multiplyScalar(0.45);
+      mat.toneMapped = false;
+      mat.fog = false;
     }
     return mat;
+  }
+
+  function placeMesh(obj, m, group) {
+    if (m.overlay) obj.renderOrder = 10; // drawn after surfaces
+    group.add(obj);
   }
 
   function loadModels() {
@@ -574,15 +583,15 @@
       if (ext === 'stl') {
         if (typeof THREE.STLLoader === 'undefined') { tick(); return; }
         new THREE.STLLoader().load(m.url, function (geo) {
-          geo.computeVertexNormals();
-          group.add(new THREE.Mesh(geo, mat));
+          if (!geo.attributes.normal) geo.computeVertexNormals();
+          placeMesh(new THREE.Mesh(geo, mat), m, group);
           tick();
         }, undefined, tick);
       } else {
         if (typeof THREE.OBJLoader === 'undefined') { tick(); return; }
         new THREE.OBJLoader().load(m.url, function (obj) {
           obj.traverse(function (c) { if (c.isMesh) c.material = mat; });
-          group.add(obj);
+          placeMesh(obj, m, group);
           tick();
         }, undefined, tick);
       }
@@ -605,9 +614,21 @@
     var camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     camera.position.set(0, 0, 2.4);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    var key = new THREE.DirectionalLight(0xffffff, 0.85); key.position.set(1, 1, 1.2); scene.add(key);
-    var fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(-1, -0.5, -1); scene.add(fill);
+    // Lighting tuned for a single-lens display: a directional key gives
+    // strong form-from-shading, a cool hemisphere adds a gradient so
+    // curvature reads, and a dim back/rim light separates silhouettes.
+    scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+    scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x202028, 0.55));
+    var key = new THREE.DirectionalLight(0xffffff, 1.0);
+    key.position.set(0.6, 1.0, 0.8);
+    scene.add(key);
+    var rim = new THREE.DirectionalLight(0x88aaff, 0.5);
+    rim.position.set(-0.8, 0.2, -1.0);
+    scene.add(rim);
+
+    // Depth cueing: far surfaces fade to black (= transparent on the
+    // additive lens), giving a strong monocular depth cue as it rotates.
+    scene.fog = new THREE.Fog(0x000000, 1.8, 3.6);
 
     // Center the combined geometry at the origin, then scale to fit the view
     var box = new THREE.Box3().setFromObject(group);
