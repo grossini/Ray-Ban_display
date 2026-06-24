@@ -618,16 +618,18 @@
       if (e.target.files.length) loadDicomSeries(e.target.files);
     });
 
-    // Drag-and-drop
+    // Drag-and-drop (desktop only — drop zone may be absent)
     var dz = document.getElementById('drop-zone');
-    dz.addEventListener('dragover',  function (e) { e.preventDefault(); dz.classList.add('drag-over'); });
-    dz.addEventListener('dragleave', function ()  { dz.classList.remove('drag-over'); });
-    dz.addEventListener('drop', function (e) {
-      e.preventDefault();
-      dz.classList.remove('drag-over');
-      var f = e.dataTransfer.files[0];
-      if (f) loadDicomFile(f);
-    });
+    if (dz) {
+      dz.addEventListener('dragover',  function (e) { e.preventDefault(); dz.classList.add('drag-over'); });
+      dz.addEventListener('dragleave', function ()  { dz.classList.remove('drag-over'); });
+      dz.addEventListener('drop', function (e) {
+        e.preventDefault();
+        dz.classList.remove('drag-over');
+        var f = e.dataTransfer.files[0];
+        if (f) loadDicomFile(f);
+      });
+    }
 
     // Keyboard / D-pad
     document.addEventListener('keydown', function (e) {
