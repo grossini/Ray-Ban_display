@@ -72,6 +72,128 @@
 
   // ── DICOM loading ────────────────────────────────────────
 
+  function readFileAsync(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload  = function (e) { resolve(e.target.result); };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function loadDicomSeries(files) {
+    var dcmFiles = Array.from(files).filter(function (f) {
+      return f.name.toLowerCase().endsWith('.dcm') || f.type === 'application/dicom';
+    });
+    if (!dcmFiles.length) { onError('No DICOM files found in folder.'); return; }
+
+    navigateTo('loading-screen', { addToHistory: false });
+    setLoadingText('Reading ' + dcmFiles.length + ' slices…');
+    setProgress(5);
+
+    Promise.all(dcmFiles.map(readFileAsync)).then(function (buffers) {
+      setProgress(30);
+      setLoadingText('Parsing slices…');
+
+      var slices = [];
+      buffers.forEach(function (buf, i) {
+        try {
+          var byteArray = new Uint8Array(buf);
+          var dataSet   = dicomParser.parseDicom(byteArray);
+          var posStr    = dataSet.string('x00200032'); // ImagePositionPatient
+          var z         = posStr ? parseFloat(posStr.split('\\')[2]) : null;
+          var inst      = dataSet.uint16('x00200013') || i;
+          slices.push({ dataSet, byteArray, z: z !== null ? z : inst });
+        } catch (e) { /* skip unparseable */ }
+      });
+
+      if (!slices.length) throw new Error('Could not parse any DICOM slices.');
+
+      // Sort slices foot-to-head by Z position
+      slices.sort(function (a, b) { return a.z - b.z; });
+
+      setProgress(50);
+      setLoadingText('Building volume (' + slices.length + ' slices)…');
+
+      setTimeout(function () {
+        try {
+          var vol = buildVolumeFromSeries(slices);
+          setProgress(80);
+          setLoadingText('Uploading to GPU…');
+          setTimeout(function () {
+            try {
+              setupViewer(vol);
+              setProgress(100);
+              navigateTo('viewer', { addToHistory: false });
+            } catch (err) { onError('Renderer error: ' + err.message); }
+          }, 60);
+        } catch (err) { onError('Volume error: ' + err.message); }
+      }, 60);
+
+    }).catch(function (err) { onError('Series error: ' + err.message); });
+  }
+
+  function buildVolumeFromSeries(slices) {
+    var first  = slices[0].dataSet;
+    var rows   = first.uint16('x00280010') || 512;
+    var cols   = first.uint16('x00280011') || 512;
+    var frames = slices.length;
+    var bitsAllocated = first.uint16('x00280100') || 16;
+
+    var wcStr = first.string('x00281050');
+    var wwStr = first.string('x00281051');
+    var wc    = wcStr ? parseFloat(wcStr.split('\\')[0]) : 0;
+    var ww    = wwStr ? parseFloat(wwStr.split('\\')[0]) : 0;
+
+    // Auto window by sampling across slices when tags missing
+    if (!ww || ww < 1) {
+      var mn = Infinity, mx = -Infinity;
+      var step = Math.max(1, Math.floor(slices.length / 10));
+      for (var si = 0; si < slices.length; si += step) {
+        var pEl = slices[si].dataSet.elements.x7fe00010;
+        if (!pEl) continue;
+        var count = rows * cols;
+        var raw = bitsAllocated === 16
+          ? new Uint16Array(slices[si].byteArray.buffer, pEl.dataOffset, count)
+          : new Uint8Array(slices[si].byteArray.buffer, pEl.dataOffset, count);
+        var ps = Math.max(1, Math.floor(count / 500));
+        for (var pi = 0; pi < raw.length; pi += ps) {
+          if (raw[pi] < mn) mn = raw[pi];
+          if (raw[pi] > mx) mx = raw[pi];
+        }
+      }
+      wc = (mn + mx) / 2;
+      ww = (mx - mn) || 1;
+    }
+
+    var wMin  = wc - ww / 2;
+    var range = ww;
+    var maxDim = CONFIG.maxVolumeDim;
+    var tW = Math.min(cols, maxDim);
+    var tH = Math.min(rows, maxDim);
+    var tD = Math.min(frames, maxDim);
+    var data = new Uint8Array(tW * tH * tD);
+
+    for (var z = 0; z < tD; z++) {
+      var srcIdx = Math.floor(z * frames / tD);
+      var pixEl  = slices[srcIdx].dataSet.elements.x7fe00010;
+      if (!pixEl) continue;
+      var rawPx = bitsAllocated === 16
+        ? new Uint16Array(slices[srcIdx].byteArray.buffer, pixEl.dataOffset, rows * cols)
+        : new Uint8Array(slices[srcIdx].byteArray.buffer, pixEl.dataOffset, rows * cols);
+      for (var y = 0; y < tH; y++) {
+        var sy = Math.floor(y * rows / tH);
+        for (var x = 0; x < tW; x++) {
+          var sx  = Math.floor(x * cols / tW);
+          var val = Math.round(255 * Math.max(0, Math.min(1, ((rawPx[sy * cols + sx] || 0) - wMin) / range)));
+          data[z * tH * tW + y * tW + x] = val;
+        }
+      }
+    }
+
+    return { data, width: tW, height: tH, depth: tD };
+  }
+
   function loadDicomFile(file) {
     navigateTo('loading-screen', { addToHistory: false });
     setLoadingText('Reading file…');
@@ -404,6 +526,9 @@
       case 'pick-file':
         document.getElementById('file-input').click();
         break;
+      case 'pick-folder':
+        document.getElementById('folder-input').click();
+        break;
       case 'back':
         if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
         navigateTo('home', { addToHistory: false });
@@ -420,9 +545,14 @@
       if (el) handleAction(el.dataset.action);
     });
 
-    // File picker
+    // Single file picker
     document.getElementById('file-input').addEventListener('change', function (e) {
       if (e.target.files[0]) loadDicomFile(e.target.files[0]);
+    });
+
+    // CT series folder picker
+    document.getElementById('folder-input').addEventListener('change', function (e) {
+      if (e.target.files.length) loadDicomSeries(e.target.files);
     });
 
     // Drag-and-drop

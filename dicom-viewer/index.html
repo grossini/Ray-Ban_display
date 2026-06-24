@@ -22,13 +22,15 @@
       <div class="content centered">
         <div class="drop-zone" id="drop-zone">
           <div class="drop-icon">🩻</div>
-          <div class="drop-label">Drop DICOM file here</div>
-          <div class="drop-hint">or use the button below</div>
+          <div class="drop-label">Drop file or folder here</div>
+          <div class="drop-hint">single DICOM or CT series folder</div>
         </div>
         <input type="file" id="file-input" accept=".dcm,application/dicom" style="display:none">
+        <input type="file" id="folder-input" webkitdirectory multiple style="display:none">
       </div>
       <nav class="nav-bar">
-        <button class="nav-item focusable primary" data-action="pick-file">Load DICOM File</button>
+        <button class="nav-item focusable primary" data-action="pick-file">Single File</button>
+        <button class="nav-item focusable" data-action="pick-folder">CT Series Folder</button>
       </nav>
     </div>
 
